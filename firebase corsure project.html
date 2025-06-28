@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Cards App</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f4f4f4; }
+    nav { background: #333; color: #fff; padding: 1em; display: flex; justify-content: space-between; }
+    nav a { color: #fff; margin: 0 1em; text-decoration: none; }
+    .container { max-width: 800px; margin: 2em auto; background: #fff; padding: 2em; border-radius: 8px; }
+    .card-list { display: flex; flex-wrap: wrap; gap: 1em; }
+    .card { background: #fafafa; border: 1px solid #ddd; border-radius: 6px; padding: 1em; width: 220px; box-shadow: 0 2px 4px rgba(0,0,0,0.04);}
+    .card-title { font-weight: bold; margin-bottom: 0.5em; }
+    .card-actions { margin-top: 1em; display: flex; gap: 0.5em; }
+    button { padding: 0.4em 1em; border: none; border-radius: 4px; cursor: pointer; }
+    .btn-primary { background: #007bff; color: #fff; }
+    .btn-danger { background: #dc3545; color: #fff; }
+    .btn-secondary { background: #6c757d; color: #fff; }
+    form { display: flex; flex-direction: column; gap: 0.5em; }
+    input, textarea { padding: 0.5em; border: 1px solid #ccc; border-radius: 4px; }
+    .hidden { display: none; }
+    .error { color: #dc3545; }
+  </style>
+  <!-- Firebase App (the core Firebase SDK) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+  <nav>
+    <div>
+      <a href="#" id="nav-preview">Cards Preview</a>
+      <a href="#" id="nav-admin">Admin Dashboard</a>
+    </div>
+    <div id="nav-auth"></div>
+  </nav>
+  <div class="container">
+    <!-- Preview Page -->
+    <div id="preview-page">
+      <h2>Cards Preview</h2>
+      <div class="card-list" id="preview-cards"></div>
+    </div>
+    <!-- Admin Dashboard -->
+    <div id="admin-page" class="hidden">
+      <h2>Admin Dashboard</h2>
+      <div id="admin-auth-section">
+        <form id="login-form">
+          <input type="email" id="admin-email" placeholder="Admin Email" required>
+          <input type="password" id="admin-password" placeholder="Password" required>
+          <button type="submit" class="btn-primary">Login</button>
+        </form>
+        <div class="error" id="login-error"></div>
+      </div>
+      <div id="admin-content" class="hidden">
+        <button id="logout-btn" class="btn-secondary">Logout</button>
+        <h3>Add / Edit Card</h3>
+        <form id="card-form">
+          <input type="text" id="card-title" placeholder="Title" required>
+          <textarea id="card-description" placeholder="Description" required></textarea>
+          <input type="hidden" id="card-id">
+          <button type="submit" class="btn-primary" id="save-card-btn">Add Card</button>
+          <button type="button" class="btn-secondary hidden" id="cancel-edit-btn">Cancel</button>
+        </form>
+        <h3>All Cards</h3>
+        <div class="card-list" id="admin-cards"></div>
+      </div>
+    </div>
+  </div>
+  <script>
+
+    // --- Firebase Config (Replace with your own config) ---
+    const firebaseConfig = {
+        apiKey: "AIzaSyAXOilCGewfLvoSI6nyJzZIHhptkMbdCB4",
+        authDomain: "corsureproject.firebaseapp.com",
+        projectId: "corsureproject",
+        databaseURL: "https://corsureproject-default-rtdb.europe-west1.firebasedatabase.app/" ,
+        storageBucket: "corsureproject.firebasestorage.app",
+        messagingSenderId: "71181808687",
+        appId: "1:71181808687:web:61bd839be7222c9ac382da"
+};
+
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    // --- Simple Routing ---
+    const previewPage = document.getElementById('preview-page');
+    const adminPage = document.getElementById('admin-page');
+    const navPreview = document.getElementById('nav-preview');
+    const navAdmin = document.getElementById('nav-admin');
+    function showPage(page) {
+      if (page === 'preview') {
+        previewPage.classList.remove('hidden');
+        adminPage.classList.add('hidden');
+      } else {
+        previewPage.classList.add('hidden');
+        adminPage.classList.remove('hidden');
+      }
+    }
+    navPreview.onclick = (e) => { e.preventDefault(); showPage('preview'); };
+    navAdmin.onclick = (e) => { e.preventDefault(); showPage('admin'); };
+
+    // --- Cards Preview (Read Only) ---
+    function renderPreviewCards(cards) {
+      const container = document.getElementById('preview-cards');
+      container.innerHTML = '';
+      cards.forEach(card => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.innerHTML = `
+          <div class="card-title">${card.title}</div>
+          <div>${card.description}</div>
+        `;
+        container.appendChild(div);
+      });
+    }
+    function loadPreviewCards() {
+      db.collection('cards').orderBy('title').onSnapshot(snapshot => {
+        const cards = [];
+        snapshot.forEach(doc => cards.push({ id: doc.id, ...doc.data() }));
+        renderPreviewCards(cards);
+      });
+    }
+    loadPreviewCards();
+
+    // --- Admin Auth ---
+    const adminEmails = ["kernoumehdi17@gmail.com", "pluss.development@gmail.com"];
+let currentUser = null;
+function updateNavAuth() {
+  const navAuth = document.getElementById('nav-auth');
+  if (currentUser) {
+    navAuth.innerHTML = `<span>Admin: ${currentUser.email}</span>`;
+  } else {
+    navAuth.innerHTML = '';
+  }
+}
+auth.onAuthStateChanged(user => {
+  currentUser = user && adminEmails.includes(user.email) ? user : null;
+  updateNavAuth();
+  if (currentUser) {
+    document.getElementById('admin-auth-section').classList.add('hidden');
+    document.getElementById('admin-content').classList.remove('hidden');
+    loadAdminCards();
+  } else {
+    document.getElementById('admin-auth-section').classList.remove('hidden');
+    document.getElementById('admin-content').classList.add('hidden');
+  }
+});
+document.getElementById('login-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('admin-email').value;
+  const password = document.getElementById('admin-password').value;
+  document.getElementById('login-error').textContent = '';
+  try {
+    const cred = await auth.signInWithEmailAndPassword(email, password);
+    if (!adminEmails.includes(cred.user.email)) {
+      await auth.signOut();
+      throw new Error("Not authorized as admin.");
+    }
+  } catch (err) {
+    document.getElementById('login-error').textContent = err.message;
+  }
+};
+    document.getElementById('logout-btn').onclick = () => auth.signOut();
+
+    // --- Admin CRUD Operations ---
+    function renderAdminCards(cards) {
+      const container = document.getElementById('admin-cards');
+      container.innerHTML = '';
+      cards.forEach(card => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.innerHTML = `
+          <div class="card-title">${card.title}</div>
+          <div>${card.description}</div>
+          <div class="card-actions">
+            <button class="btn-primary" data-id="${card.id}" data-action="edit">Edit</button>
+            <button class="btn-danger" data-id="${card.id}" data-action="delete">Delete</button>
+          </div>
+        `;
+        container.appendChild(div);
+      });
+      // Attach event listeners
+      container.querySelectorAll('button[data-action="edit"]').forEach(btn => {
+        btn.onclick = () => startEditCard(btn.dataset.id);
+      });
+      container.querySelectorAll('button[data-action="delete"]').forEach(btn => {
+        btn.onclick = () => deleteCard(btn.dataset.id);
+      });
+    }
+    let adminCardsUnsub = null;
+    function loadAdminCards() {
+      if (adminCardsUnsub) adminCardsUnsub();
+      if (!currentUser) return;
+      adminCardsUnsub = db.collection('cards')
+        .where('createdBy', '==', currentUser.email)
+        .orderBy('title')
+        .onSnapshot(snapshot => {
+          const cards = [];
+          snapshot.forEach(doc => cards.push({ id: doc.id, ...doc.data() }));
+          renderAdminCards(cards);
+        });
+    }
+    // Add / Update Card
+    const cardForm = document.getElementById('card-form');
+    const cardIdInput = document.getElementById('card-id');
+    const cardTitleInput = document.getElementById('card-title');
+    const cardDescInput = document.getElementById('card-description');
+    const saveCardBtn = document.getElementById('save-card-btn');
+    const cancelEditBtn = document.getElementById('cancel-edit-btn');
+    cardForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const id = cardIdInput.value;
+      const title = cardTitleInput.value.trim();
+      const description = cardDescInput.value.trim();
+      if (!title || !description) return;
+      if (id) {
+        // Update (do not change createdBy)
+        await db.collection('cards').doc(id).update({ title, description });
+      } else {
+        // Add (set createdBy)
+        await db.collection('cards').add({ title, description, createdBy: currentUser ? currentUser.email : null });
+      }
+      cardForm.reset();
+      cardIdInput.value = '';
+      saveCardBtn.textContent = 'Add Card';
+      cancelEditBtn.classList.add('hidden');
+    };
+    function startEditCard(id) {
+      db.collection('cards').doc(id).get().then(doc => {
+        if (doc.exists) {
+          const data = doc.data();
+          cardIdInput.value = id;
+          cardTitleInput.value = data.title;
+          cardDescInput.value = data.description;
+          saveCardBtn.textContent = 'Update Card';
+          cancelEditBtn.classList.remove('hidden');
+        }
+      });
+    }
+    cancelEditBtn.onclick = () => {
+      cardForm.reset();
+      cardIdInput.value = '';
+      saveCardBtn.textContent = 'Add Card';
+      cancelEditBtn.classList.add('hidden');
+    };
+    async function deleteCard(id) {
+      if (confirm('Delete this card?')) {
+        await db.collection('cards').doc(id).delete();
+      }
+    }
+
+    // --- Initial Page ---
+    showPage('preview');
+  </script>
+</body>
+</html>
